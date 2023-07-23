@@ -1,4 +1,8 @@
-add_executable(vulkan_test main.cpp)
+add_executable(vulkan_test 
+main.cpp
+vk_engine.cpp
+vk_initializers.cpp
+)
 
 target_include_directories(vulkan_test PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
