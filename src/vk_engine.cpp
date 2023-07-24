@@ -2,10 +2,11 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 
-#include <vk_types.h>
+//#include <vk_types.h>
 #include <vk_initializers.h>
 #include <iostream>
 #include <array>
+#include <algorithm>
 constexpr bool bUseValidationLayers = true;
 
 //we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
@@ -97,6 +98,7 @@ void VulkanEngine::init_vulkan(){
 
     VK_CHECK(vkCreateInstance(&instanceInfo,nullptr,&_instance))
 
+    SDL_Vulkan_CreateSurface(_window,_instance,&_surface);
     //init physicalDevice
 
     uint32_t physicalDeviceCount = 0;
@@ -130,11 +132,42 @@ void VulkanEngine::init_vulkan(){
 
     VK_CHECK(vkCreateDevice(_chosenGPU,&deviceInfo,nullptr,&_device))
     vkGetDeviceQueue(_device,_graphicsQueueFamily,0,&_graphicsQueue);
-
-
 }
 
-void VulkanEngine::init_swapchain(){}
+void VulkanEngine::init_swapchain(){
+    querySwapchainSupport();
+    VkSwapchainCreateInfoKHR swapchainInfo{};
+    swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchainInfo.clipped = VK_TRUE;
+    swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchainInfo.imageArrayLayers = 1;
+    swapchainInfo.imageColorSpace = details.format.colorSpace;
+    swapchainInfo.imageExtent = details.imageExtent;
+    swapchainInfo.imageFormat = details.format.format;
+    swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchainInfo.minImageCount = details.imageCount;
+    swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchainInfo.presentMode = details.present;
+    swapchainInfo.preTransform = details.transform;
+    swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
+    swapchainInfo.surface = _surface;
+    VK_CHECK(vkCreateSwapchainKHR(_device,&swapchainInfo,nullptr,&_swapchain))
+
+    uint32_t imageCount = 0;
+    vkGetSwapchainImagesKHR(_device,_swapchain,&imageCount,nullptr);
+    _swapchainImages.resize(imageCount);
+    vkGetSwapchainImagesKHR(_device,_swapchain,&imageCount,_swapchainImages.data());
+
+    _swapchainImageViews.resize(_swapchainImages.size());
+
+    for(int i = 0;i<_swapchainImageViews.size();i++)
+    {
+        auto createInfo = vkinit::imageview_begin_info(_swapchainImages[i],details.format.format,VK_IMAGE_ASPECT_COLOR_BIT);
+        VK_CHECK(vkCreateImageView(_device,&createInfo,nullptr,&_swapchainImageViews[i]))
+    }
+
+    _swapchainImageFormat = details.format.format;
+}
 
 void VulkanEngine::init_default_renderpass(){}
 
@@ -159,4 +192,31 @@ void VulkanEngine::findQueueIndex(){
         }
     }
 
+}
+
+void VulkanEngine::querySwapchainSupport(){
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_chosenGPU,_surface,&details.capabilities);
+
+    uint32_t formatCount = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(_chosenGPU,_surface,&formatCount,nullptr);
+    std::vector<VkSurfaceFormatKHR> surfaceFormats(formatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(_chosenGPU,_surface,&formatCount,surfaceFormats.data());
+
+    details.format = surfaceFormats[0];
+
+    for(const auto& format:surfaceFormats)
+    {
+        if(format.format == VK_FORMAT_R8G8B8_SRGB&&
+        format.colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR){
+            details.format = format;
+            break;
+        }
+    }
+    
+    details.imageCount = 2;
+    details.imageExtent.width = 1024;
+    details.imageExtent.height = 720;
+    details.transform = details.capabilities.currentTransform;
+
+    details.present = VK_PRESENT_MODE_FIFO_KHR;
 }

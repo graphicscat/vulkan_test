@@ -22,5 +22,6 @@ namespace vkinit {
 
 	VkRenderPassBeginInfo renderpass_begin_info(VkRenderPass renderPass, VkExtent2D windowExtent, VkFramebuffer framebuffer);
 
+	VkImageViewCreateInfo imageview_begin_info(VkImage image,VkFormat format,VkImageAspectFlagBits aspect);
 }
 

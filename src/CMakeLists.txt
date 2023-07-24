@@ -1,4 +1,6 @@
 add_executable(vulkan_test 
+vk_engine.h
+vk_initializers.h
 main.cpp
 vk_engine.cpp
 vk_initializers.cpp

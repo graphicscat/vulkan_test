@@ -35,7 +35,18 @@ public:
 
 	VkSurfaceKHR _surface;
 	VkSwapchainKHR _swapchain;
-	VkFormat _swachainImageFormat;
+	VkFormat _swapchainImageFormat;
+
+	struct SwapchainDetails
+	{
+		VkSurfaceCapabilitiesKHR capabilities;
+		VkSurfaceFormatKHR format;
+		VkPresentModeKHR present;
+		VkSurfaceTransformFlagBitsKHR transform;
+		VkExtent2D imageExtent;
+		uint32_t imageCount;
+	}details;
+	
 
 	std::vector<VkFramebuffer> _framebuffers;
 	std::vector<VkImage> _swapchainImages;
@@ -68,5 +79,7 @@ private:
 	void init_sync_structures();
 
     void findQueueIndex();
+
+	void querySwapchainSupport();
 
 };
