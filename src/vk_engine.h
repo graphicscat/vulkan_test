@@ -2,9 +2,43 @@
 
 #include <vk_types.h>
 #include <vector>
-
+#include <deque>
+#include <functional>
 const std::vector<const char*> validationLayers = {
   "VK_LAYER_KHRONOS_validation"  
+};
+
+class PipelineBuilder {
+public:
+
+	std::vector<VkPipelineShaderStageCreateInfo> _shaderStages;
+	VkPipelineVertexInputStateCreateInfo _vertexInputInfo;
+	VkPipelineInputAssemblyStateCreateInfo _inputAssembly;
+	VkViewport _viewport;
+	VkRect2D _scissor;
+	VkPipelineRasterizationStateCreateInfo _rasterizer;
+	VkPipelineColorBlendAttachmentState _colorBlendAttachment;
+	VkPipelineMultisampleStateCreateInfo _multisampling;
+	VkPipelineLayout _pipelineLayout;
+
+	VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
+};
+
+struct DeletionQueue
+{
+	std::deque<std::function<void()>> deletors;
+
+	void push_function(std::function<void()>&& func){
+		deletors.push_back(func);
+	}
+
+	void flush(){
+		for(auto it = deletors.rbegin();it!=deletors.rend();it++){
+			(*it)();
+		}
+
+		deletors.clear();
+	}
 };
 
 class VulkanEngine {
@@ -12,6 +46,7 @@ public:
 
     bool _isInitialized{false};
     int _frameNumber {0};
+	int _selectedShader{ 1 };
 
 	VkExtent2D _windowExtent{ 1024 , 720 };
 
@@ -30,6 +65,7 @@ public:
 
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
+	std::vector<VkCommandBuffer> flightCmdBuffers;
 	
 	VkRenderPass _renderPass;
 
@@ -51,6 +87,11 @@ public:
 	std::vector<VkFramebuffer> _framebuffers;
 	std::vector<VkImage> _swapchainImages;
 	std::vector<VkImageView> _swapchainImageViews;
+
+	VkPipelineLayout _trianglePipelineLayout;
+	VkPipeline _trianglePipeline;
+	VkPipeline _redTrianglePipeline;
+	DeletionQueue _mainDeletionQueue;
 
 	//initializes everything in the engine
 	void init();
@@ -81,5 +122,14 @@ private:
     void findQueueIndex();
 
 	void querySwapchainSupport();
+
+	void init_pipelines();
+
+	//loads a shader module from a spir-v file. Returns false if it errors
+	bool load_shader_module(const char* filePath, VkShaderModule* outShaderModule);
+
+	void buildCommandBuffer();
+
+	void updateFrame();
 
 };
