@@ -4,10 +4,7 @@
 
 //#include <vk_types.h>
 #include <vk_initializers.h>
-#include <iostream>
-#include <array>
-#include <algorithm>
-#include <fstream>
+
 #include <math.h>
 constexpr bool bUseValidationLayers = true;
 
@@ -712,3 +709,207 @@ void VulkanEngine::updateFrame()
     vkQueueWaitIdle(_graphicsQueue);
 
 }
+
+Material *VulkanEngine::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
+{
+    Material mat;
+	mat.pipeline = pipeline;
+	mat.pipelineLayout = layout;
+	_materials[name] = mat;
+	return &_materials[name];
+}
+
+Material* VulkanEngine::get_material(const std::string& name)
+{
+    auto it = _materials.find(name);
+	if (it == _materials.end()) {
+		return nullptr;
+	}
+	else {
+		return &(*it).second;
+	}
+}
+
+Mesh* VulkanEngine::get_mesh(const std::string& name)
+{
+    auto it = _meshes.find(name);
+	if (it == _meshes.end()) {
+		return nullptr;
+	}
+	else {
+		return &(*it).second;
+	}
+}
+
+void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count)
+{
+
+}
+
+void VulkanEngine::init_scene()
+{
+
+}
+
+void VulkanEngine::load_meshes()
+{
+    Mesh triMesh{};
+	//make the array 3 vertices long
+	triMesh._vertices.resize(3);
+
+	//vertex positions
+	triMesh._vertices[0].position = { 1.f,1.f, 0.0f };
+	triMesh._vertices[1].position = { -1.f,1.f, 0.0f };
+	triMesh._vertices[2].position = { 0.f,-1.f, 0.0f };
+
+	//vertex colors, all green
+	triMesh._vertices[0].color = { 0.f,1.f, 0.0f }; //pure green
+	triMesh._vertices[1].color = { 0.f,1.f, 0.0f }; //pure green
+	triMesh._vertices[2].color = { 0.f,1.f, 0.0f }; //pure green
+	//we dont care about the vertex normals
+
+	//load the monkey
+	Mesh monkeyMesh{};
+	monkeyMesh.load_from_obj("assets/monkey_smooth.obj");
+
+	upload_mesh(triMesh);
+	upload_mesh(monkeyMesh);
+
+	_meshes["monkey"] = monkeyMesh;
+	_meshes["triangle"] = triMesh;
+    //_meshes.emplace("monkey",monkeyMesh);
+}
+
+void VulkanEngine::upload_mesh(Mesh& mesh)
+{
+    //allocate vertex buffer
+	VkBufferCreateInfo bufferInfo = {};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.pNext = nullptr;
+	//this is the total size, in bytes, of the buffer we are allocating
+	bufferInfo.size = mesh._vertices.size() * sizeof(Vertex);
+	//this buffer is going to be used as a Vertex Buffer
+	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+    size_t vertexBufferSize = mesh._vertices.size()*sizeof(Vertex);
+
+    struct StagingBuffer
+    {
+        /* data */
+        VkBuffer buffer;
+        VkDeviceMemory memory;
+    }stagingBuffer{};
+
+    createBuffer(vertexBufferSize,
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    stagingBuffer.buffer,
+    stagingBuffer.memory,
+    mesh._vertices.data());
+
+    createBuffer(
+        vertexBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        mesh._vertexBuffer.buffer,
+        mesh._vertexBuffer.memory
+    );
+
+    copyBuffer(stagingBuffer.buffer,mesh._vertexBuffer.buffer,vertexBufferSize);
+
+    vkFreeMemory(_device,stagingBuffer.memory,nullptr);
+    vkDestroyBuffer(_device,stagingBuffer.buffer,nullptr);
+
+}
+
+VkCommandBuffer VulkanEngine::beginSingleCommand()
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandBufferCount = 1;
+    allocInfo.commandPool = _commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    VkCommandBuffer cmdBuffer;
+    VK_CHECK(vkAllocateCommandBuffers(_device,&allocInfo,&cmdBuffer))
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmdBuffer,&beginInfo))
+
+    return cmdBuffer;
+
+};
+
+void VulkanEngine::endSingleCommand(VkCommandBuffer cmdBuffer)
+{
+    vkEndCommandBuffer(cmdBuffer);
+    VkSubmitInfo submit{};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmdBuffer;
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    vkQueueSubmit(_graphicsQueue,1,&submit,VK_NULL_HANDLE);
+    vkDeviceWaitIdle(_device);
+    vkFreeCommandBuffers(_device,_commandPool,1,&cmdBuffer);
+};
+
+void VulkanEngine::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer& buffer,
+    VkDeviceMemory& memory,
+    void* data/* = nullptr*/)
+    {
+        VkBufferCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        createInfo.size = size;
+        createInfo.usage = usage;
+        createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VK_CHECK(vkCreateBuffer(_device,&createInfo,nullptr,&buffer))
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        VkMemoryRequirements memRequirements{};
+        vkGetBufferMemoryRequirements(_device,buffer,&memRequirements);
+        auto typeFilter = memRequirements.memoryTypeBits;
+        allocInfo.memoryTypeIndex = findMemoryType(typeFilter,properties);
+        allocInfo.allocationSize = memRequirements.size;
+
+        VK_CHECK(vkAllocateMemory(_device,&allocInfo,nullptr,&memory))
+        VK_CHECK(vkBindBufferMemory(_device,buffer,memory,0))
+        void* mapped = nullptr;
+
+        if(!data)
+        {
+            vkMapMemory(_device,memory,0,size,0,&data);
+            memcpy(mapped,data,size);
+            vkUnmapMemory(_device,memory);
+        }
+    }
+
+    int VulkanEngine::findMemoryType(int typeFilter,VkMemoryPropertyFlags properties)
+    {
+        VkPhysicalDeviceMemoryProperties memProperties{};
+        vkGetPhysicalDeviceMemoryProperties(_chosenGPU,&memProperties);
+
+        for(uint32_t i = 0; i < memProperties.memoryTypeCount;i++)
+        {
+            if(typeFilter & ( 1 << i ) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+            return i ;
+        }
+
+        return 0;
+    }
+
+    void VulkanEngine::copyBuffer(VkBuffer srcBuffer,VkBuffer dstBuffer,VkDeviceSize size)
+    {
+        VkCommandBuffer cmd = beginSingleCommand();
+		VkBufferCopy bufferCopy{};
+		bufferCopy.size = size;
+		bufferCopy.dstOffset = 0;
+		bufferCopy.srcOffset = 0;
+
+		vkCmdCopyBuffer(cmd,srcBuffer,dstBuffer,1,&bufferCopy);
+		endSingleCommand(cmd);
+    }
