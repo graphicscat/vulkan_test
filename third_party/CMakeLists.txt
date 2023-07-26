@@ -7,6 +7,14 @@ add_library(stb_image INTERFACE)
 add_library(sdl2 INTERFACE)
 set(sdl2_DIR "SDL_PATH" CACHE FILEPATH "Path to SDL2")
 
+add_library(tinyobjloader STATIC)
+target_sources(tinyobjloader PRIVATE 
+  tinyobjloader/tiny_obj_loader.h
+  tinyobjloader/tiny_obj_loader.cc
+  )
+
+target_include_directories(tinyobjloader PUBLIC tinyobjloader)
+
 # if (WIN32)
 # target_include_directories(sdl2 INTERFACE ${sdl2_DIR}/include ${sdl2_image_DIR}/include)
 # target_link_directories(sdl2 INTERFACE ${sdl2_DIR}/lib/x64 ${sdl2_image_DIR}/lib/x64)
