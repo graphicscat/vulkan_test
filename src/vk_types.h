@@ -8,3 +8,11 @@
 #include <unordered_map>
 #include <string>
 #include <string.h>
+
+struct AllocatedImage {
+	VkImage _image;
+	VkImageView _view;
+    VkSampler _sampler;
+    VkDeviceMemory _mem;
+    VkDescriptorImageInfo descriptor{};
+};

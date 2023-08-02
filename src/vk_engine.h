@@ -8,7 +8,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
-
+#include <vk_camera.h>
 const std::vector<const char*> validationLayers = {
   "VK_LAYER_KHRONOS_validation"  
 };
@@ -25,7 +25,7 @@ public:
 	VkPipelineColorBlendAttachmentState _colorBlendAttachment;
 	VkPipelineMultisampleStateCreateInfo _multisampling;
 	VkPipelineLayout _pipelineLayout;
-
+	VkPipelineDepthStencilStateCreateInfo _depthStencil;
 	VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
 };
 
@@ -47,6 +47,7 @@ struct DeletionQueue
 };
 
 struct Material {
+	VkDescriptorSet textureSet{VK_NULL_HANDLE};
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
 };
@@ -57,6 +58,29 @@ struct RenderObject {
 	Material* material;
 
 	glm::mat4 transformMatrix;
+};
+
+struct MeshPushConstants {
+	//glm::vec4 data;
+	glm::mat4 render_matrix;
+};
+
+struct ShaderData
+{
+	struct GPUCameraData{
+		glm::mat4 view;
+		glm::mat4 proj;
+		glm::mat4 viewproj;
+	}_cameraData;
+
+	struct UBOBuffer
+	{
+		VkBuffer buffer;
+		VkDeviceMemory mem;
+		VkDescriptorBufferInfo descriptor{};
+		void* mapped = nullptr;
+	}_cameraBuffer;
+
 };
 
 class VulkanEngine {
@@ -76,7 +100,10 @@ public:
 	VkDevice _device;
 
 	VkSemaphore _presentSemaphore, _renderSemaphore;
+	std::vector<VkSemaphore> _presentSemaphores;
+	std::vector<VkSemaphore>_renderSemaphores;
 	VkFence _renderFence;
+	std::vector<VkFence> _renderFences;
 
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
@@ -99,7 +126,7 @@ public:
 		VkSurfaceTransformFlagBitsKHR transform;
 		VkExtent2D imageExtent;
 		uint32_t imageCount;
-	}details;
+	}_details;
 	
 
 	std::vector<VkFramebuffer> _framebuffers;
@@ -111,6 +138,13 @@ public:
 	VkPipeline _redTrianglePipeline;
 	DeletionQueue _mainDeletionQueue;
 
+	ShaderData _shaderData;
+	VkDescriptorPool _descriptorPool;
+	VkDescriptorSetLayout _descriptorSetLayout;
+	VkDescriptorSetLayout _textureSetLayout;
+	VkDescriptorSet _uboSet;
+
+	AllocatedImage _texture;
 	//initializes everything in the engine
 	void init();
 
@@ -128,6 +162,48 @@ public:
 
 	std::unordered_map<std::string, Material> _materials;
 	std::unordered_map<std::string, Mesh> _meshes;
+	std::unordered_map<std::string, AllocatedImage> _loadedTextures;
+
+	struct {
+		VkImage image;
+		VkDeviceMemory mem;
+		VkImageView view;
+		VkFormat format;
+	} _depthStencil;
+
+	Camera _camera;
+
+		void createBuffer(
+		VkDeviceSize size,
+		VkBufferUsageFlags usage,
+		VkMemoryPropertyFlags properties,
+		VkBuffer& buffer,
+		VkDeviceMemory& memory,
+		void* data = nullptr
+	);
+
+	int findMemoryType(int typeFilter,VkMemoryPropertyFlags properties);
+
+	void copyBuffer(VkBuffer srcBuffer,VkBuffer dstBuffer,VkDeviceSize size);
+
+	void createImage(
+		uint32_t width,
+		uint32_t height,
+		VkFormat format,
+		VkImageTiling tiling,
+		VkImageUsageFlags usage,
+		VkMemoryPropertyFlags properties,
+		VkImage& image,
+		VkDeviceMemory& imageMemory
+	);
+
+	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlagBits aspect);
+
+	VkCommandBuffer beginSingleCommand();
+
+	void endSingleCommand(VkCommandBuffer cmdBuffer);
+
+	VkSampler createSampler();
 
 private:
 
@@ -156,6 +232,7 @@ private:
 
 	void updateFrame();
 
+	void init_camera();
 
 	//functions
 
@@ -177,20 +254,22 @@ private:
 
 	void upload_mesh(Mesh& mesh);
 
-	VkCommandBuffer beginSingleCommand();
 
-	void endSingleCommand(VkCommandBuffer cmdBuffer);
+	void load_texture();
 
-	void createBuffer(
-		VkDeviceSize size,
-		VkBufferUsageFlags usage,
-		VkMemoryPropertyFlags properties,
-		VkBuffer& buffer,
-		VkDeviceMemory& memory,
-		void* data = nullptr
-	);
 
-	int findMemoryType(int typeFilter,VkMemoryPropertyFlags properties);
+	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 
-	void copyBuffer(VkBuffer srcBuffer,VkBuffer dstBuffer,VkDeviceSize size);
+	VkFormat findDepthFormat();
+
+	void createDepthStencil();
+
+	void init_descriptors();
+
+	void createUniformBuffer();
+
+	void updateUniformBuffer();
+
+	void mouse_callback();
+	void keyboard_callback();
 };
