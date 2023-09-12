@@ -33,6 +33,6 @@ struct Mesh {
 	std::vector<Vertex> _vertices;
 
 	VertexBuffer _vertexBuffer;
-
+	glm::vec3 objectColor = glm::vec3(0.0f);
 	bool load_from_obj(const char* filename);
 };

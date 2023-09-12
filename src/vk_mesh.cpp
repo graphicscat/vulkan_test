@@ -115,7 +115,7 @@ bool Mesh::load_from_obj(const char* filename)
 				new_vert.uv.y = 1-uy;
 
 				//we are setting the vertex color as the vertex normal. This is just for display purposes
-				new_vert.color = new_vert.normal;
+				new_vert.color = this->objectColor;
 
 
 				_vertices.push_back(new_vert);

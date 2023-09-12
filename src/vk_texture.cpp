@@ -56,7 +56,7 @@ bool vkutil::load_image_from_file(VulkanEngine& engine, const char* file, Alloca
         image_format,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         newImage._image,
         newImage._mem
     );
@@ -147,7 +147,7 @@ bool vkutil::load_image_from_file(VulkanEngine& engine, const char* file, Alloca
 
  void vkutil::copyBuffertoImage(VulkanEngine& engine,VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
  {
-    	VkCommandBuffer commandBuffer = engine.beginSingleCommand();
+    VkCommandBuffer commandBuffer = engine.beginSingleCommand();
 
 	VkBufferImageCopy region{};
 	region.bufferOffset = 0;
@@ -176,4 +176,74 @@ bool vkutil::load_image_from_file(VulkanEngine& engine, const char* file, Alloca
 	);
 
 	engine.endSingleCommand(commandBuffer);
+ }
+
+ bool vkutil::load_image_from_buffer(VulkanEngine& engine, void* buffer, VkDeviceSize size, uint32_t texWidth,uint32_t texHeight, AllocatedImage& outImage)
+ {
+	VkFormat image_format = VK_FORMAT_R8G8B8A8_SRGB;
+	
+	 struct StagingBuffer
+    {
+        /* data */
+        VkBuffer buffer;
+        VkDeviceMemory memory;
+    }stagingBuffer{};
+
+    engine.createBuffer(size,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    stagingBuffer.buffer,
+    stagingBuffer.memory,
+    buffer);
+
+
+
+	//stbi_image_free(pixels);
+
+	VkExtent3D imageExtent;
+	imageExtent.width = static_cast<uint32_t>(texWidth);
+	imageExtent.height = static_cast<uint32_t>(texHeight);
+	imageExtent.depth = 1;
+	
+	VkImageCreateInfo dimg_info = vkinit::image_create_info(image_format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, imageExtent);
+
+	AllocatedImage newImage;
+
+    engine.createImage(
+        imageExtent.width,
+        imageExtent.height,
+        image_format,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        newImage._image,
+        newImage._mem
+    );
+
+    transitionImaglayout(engine,newImage._image,image_format,VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    copyBuffertoImage(engine,stagingBuffer.buffer,newImage._image,imageExtent.width,imageExtent.height);
+    transitionImaglayout(engine,newImage._image,image_format,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    vkDestroyBuffer(engine._device,stagingBuffer.buffer,nullptr);
+    vkFreeMemory(engine._device,stagingBuffer.memory,nullptr);
+
+    newImage._view = engine.createImageView(newImage._image,image_format,VK_IMAGE_ASPECT_COLOR_BIT);
+    newImage._sampler  = engine.createSampler();
+	
+    newImage.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    newImage.descriptor.sampler = newImage._sampler;
+    newImage.descriptor.imageView = newImage._view;
+
+    outImage = newImage;
+
+    engine._mainDeletionQueue.push_function([=](){
+        vkDestroySampler(engine._device,outImage._sampler,nullptr);
+        vkDestroyImageView(engine._device,outImage._view,nullptr);
+        vkDestroyImage(engine._device,outImage._image,nullptr);
+		vkFreeMemory(engine._device,outImage._mem,nullptr);
+    });
+	
+	return true;
  }

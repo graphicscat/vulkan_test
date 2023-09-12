@@ -10,4 +10,5 @@ namespace vkutil {
 	bool load_image_from_file(VulkanEngine& engine, const char* file, AllocatedImage& outImage);
     void transitionImaglayout(VulkanEngine &engine,VkImage image,VkFormat format,VkImageLayout oldLayout,VkImageLayout newLayout);
     void copyBuffertoImage(VulkanEngine& engine,VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    bool load_image_from_buffer(VulkanEngine& engine, void* buffer,VkDeviceSize size,uint32_t texWidth,uint32_t texHeight ,AllocatedImage& outImage);
 }

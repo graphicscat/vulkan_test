@@ -5,10 +5,15 @@
 #include <deque>
 #include <functional>
 #include <vk_mesh.h>
-
+#include <vk_gltfloader.h>
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 #include <vk_camera.h>
+
+#include <imgui.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <backends/imgui_impl_sdl2.h>
+
 const std::vector<const char*> validationLayers = {
   "VK_LAYER_KHRONOS_validation"  
 };
@@ -54,14 +59,13 @@ struct Material {
 
 struct RenderObject {
 	Mesh* mesh;
-
 	Material* material;
 
 	glm::mat4 transformMatrix;
 };
 
 struct MeshPushConstants {
-	//glm::vec4 data;
+	glm::vec4 objectColor = glm::vec4(0.0f,0.0f,0.0f,0.0f);
 	glm::mat4 render_matrix;
 };
 
@@ -71,6 +75,7 @@ struct ShaderData
 		glm::mat4 view;
 		glm::mat4 proj;
 		glm::mat4 viewproj;
+		glm::vec4 viewPos;
 	}_cameraData;
 
 	struct UBOBuffer
@@ -173,7 +178,7 @@ public:
 
 	Camera _camera;
 
-		void createBuffer(
+	void createBuffer(
 		VkDeviceSize size,
 		VkBufferUsageFlags usage,
 		VkMemoryPropertyFlags properties,
@@ -182,6 +187,7 @@ public:
 		void* data = nullptr
 	);
 
+	GLTFLoader testGLTF;
 	int findMemoryType(int typeFilter,VkMemoryPropertyFlags properties);
 
 	void copyBuffer(VkBuffer srcBuffer,VkBuffer dstBuffer,VkDeviceSize size);
@@ -197,7 +203,15 @@ public:
 		VkDeviceMemory& imageMemory
 	);
 
+		void createImage(
+		VkImageCreateInfo imageInfo,
+		VkMemoryPropertyFlags properties,
+		VkImage& image,
+		VkDeviceMemory& imageMemory
+	);
+
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlagBits aspect);
+	VkImageView createImageView(VkImage image, VkImageViewCreateInfo imageViewInfo);
 
 	VkCommandBuffer beginSingleCommand();
 
@@ -230,6 +244,8 @@ private:
 
 	void buildCommandBuffer();
 
+	void reBuildCommandBuffer(ImDrawData* draw_data);
+
 	void updateFrame();
 
 	void init_camera();
@@ -256,6 +272,8 @@ private:
 
 
 	void load_texture();
+
+	void init_imgui();
 
 
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
