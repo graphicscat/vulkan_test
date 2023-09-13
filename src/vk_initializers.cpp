@@ -310,3 +310,20 @@ VkWriteDescriptorSet vkinit::write_descriptor_image(VkDescriptorType type, VkDes
 
 	return write;
 }
+
+VkRenderPassCreateInfo vkinit::renderpass_create_info()
+{
+	VkRenderPassCreateInfo renderPassCreateInfo {};
+	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	return renderPassCreateInfo;
+}
+
+VkDescriptorSetLayoutCreateInfo vkinit::descriptorSetLayoutLayout_create_info(const std::vector<VkDescriptorSetLayoutBinding>&bindings)
+{
+	VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo {};
+	descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorLayoutInfo.flags = 0;
+	descriptorLayoutInfo.pBindings = bindings.data();
+	descriptorLayoutInfo.bindingCount = bindings.size();
+	return descriptorLayoutInfo;
+}

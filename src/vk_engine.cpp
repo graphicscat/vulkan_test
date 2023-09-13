@@ -16,6 +16,7 @@ constexpr bool bUseValidationLayers = true;
 
 //we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
 using namespace std;
+#define SHADOWMAP_DIM 2048
 #define VK_CHECK(x)                                                 \
 	do                                                              \
 	{                                                               \
@@ -87,6 +88,8 @@ void VulkanEngine::init(){
 
     init_sync_structures();
 
+	prepareOffscreenFramebuffer();
+
 	init_descriptors();
 
     init_pipelines();
@@ -98,6 +101,8 @@ void VulkanEngine::init(){
 	init_scene();
 
 	init_imgui();
+
+	
 
 	//testGLTF.engine = *this;
 
@@ -604,6 +609,12 @@ void VulkanEngine::init_pipelines()
 		std::cout << "Error when building the mesh vertex shader module" << std::endl;
 	}
 
+	VkShaderModule offscreenVertShader;
+	if(!load_shader_module("../../shaders/offscreen.vert.spv", &offscreenVertShader))
+	{
+		std::cout << "Error when building the mesh vertex shader module" << std::endl;
+	}
+
 	
 	//build the stage-create-info for both vertex and fragment stages. This lets the pipeline know the shader modules per stage
 	PipelineBuilder pipelineBuilder;
@@ -716,6 +727,11 @@ void VulkanEngine::init_pipelines()
 
 	vkDestroyShaderModule(_device, defaultVertShader, nullptr);
 	vkDestroyShaderModule(_device, defaultMeshShader, nullptr);
+
+	pipelineBuilder._shaderStages.clear();
+	pipelineBuilder._shaderStages.push_back(
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,offscreenVertShader)
+	);
 
 	_mainDeletionQueue.push_function([=]() {
 		vkDestroyPipeline(_device, meshPipeline, nullptr);
@@ -1457,13 +1473,20 @@ void VulkanEngine::init_descriptors()
 	VK_CHECK(vkCreateDescriptorPool(_device,&poolInfo,nullptr,&_descriptorPool))
 
 	VkDescriptorSetLayoutBinding cameraBind = 
-	vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,0);
+	vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0);
 
 	VkDescriptorSetLayoutBinding textureBind = 
 	vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT,0);
 
+	VkDescriptorSetLayoutBinding shadowMapBind = 
+	vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT,1);
+
 	std::vector<VkDescriptorSetLayoutBinding> bindings = {cameraBind};
 	std::vector<VkDescriptorSetLayoutBinding> texbindings = {textureBind};
+
+	std::vector<VkDescriptorSetLayoutBinding> shadowMapbindings = {cameraBind,shadowMapBind};
+	VkDescriptorSetLayoutCreateInfo shadowMapLayoutInfo = vkinit::descriptorSetLayoutLayout_create_info(shadowMapbindings);
+	VK_CHECK(vkCreateDescriptorSetLayout(_device,&shadowMapLayoutInfo,nullptr,&shadowMapDescriptorLayout))
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo {};
 	descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1496,10 +1519,53 @@ void VulkanEngine::init_descriptors()
 		vkUpdateDescriptorSets(_device,1,&writer,0,nullptr);
 	}
 
+	//shadowMap debug
+	{
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.descriptorPool = _descriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &shadowMapDescriptorLayout;
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		VK_CHECK(vkAllocateDescriptorSets(_device,&allocInfo,&shadowMapDescriptorSets.debug))
+
+		offscreenPass.descriptor.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		offscreenPass.descriptor.imageView =offscreenPass.depth.view;
+		offscreenPass.descriptor.sampler = offscreenPass.depthSampler;
+
+		VkWriteDescriptorSet shadowMapUboDebugWriter{};
+		shadowMapUboDebugWriter.sType =  VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		shadowMapUboDebugWriter.descriptorCount = 1;
+		shadowMapUboDebugWriter.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		shadowMapUboDebugWriter.dstBinding = 0;
+		shadowMapUboDebugWriter.dstSet = shadowMapDescriptorSets.debug;
+		shadowMapUboDebugWriter.pBufferInfo = &shadowMapUniformBuffers.sceneDescriptor;
+		vkUpdateDescriptorSets(_device,1,&shadowMapUboDebugWriter,0,nullptr);
+
+		VkWriteDescriptorSet shadowMapWrite = vkinit::write_descriptor_image(
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			shadowMapDescriptorSets.debug,
+			&offscreenPass.descriptor,
+			1
+		);
+
+		vkUpdateDescriptorSets(_device,1,&shadowMapWrite,0,nullptr);
+
+		//offscreen
+		VK_CHECK(vkAllocateDescriptorSets(_device,&allocInfo,&shadowMapDescriptorSets.offscreen))
+		shadowMapUboDebugWriter.dstSet = shadowMapDescriptorSets.offscreen;
+		shadowMapUboDebugWriter.pBufferInfo = &shadowMapUniformBuffers.offscreenDescriptor;
+		vkUpdateDescriptorSets(_device,1,&shadowMapUboDebugWriter,0,nullptr);
+	}
+	//shadowmap offscreen
+	{
+
+	}
+
 
 	_mainDeletionQueue.push_function([=](){
 		vkDestroyDescriptorSetLayout(_device,_descriptorSetLayout,nullptr);
 		vkDestroyDescriptorSetLayout(_device,_textureSetLayout,nullptr);
+		vkDestroyDescriptorSetLayout(_device,shadowMapDescriptorLayout,nullptr);
 		vkDestroyDescriptorPool(_device,_descriptorPool,nullptr);
 	});
 
@@ -1523,6 +1589,41 @@ void VulkanEngine::createUniformBuffer()
 	_mainDeletionQueue.push_function([=](){
 		vkFreeMemory(_device,_shaderData._cameraBuffer.mem,nullptr);
 		vkDestroyBuffer(_device,_shaderData._cameraBuffer.buffer,nullptr);
+	});
+
+	{
+		uint32_t size = sizeof(uboVSscene);
+		createBuffer(size,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		shadowMapUniformBuffers.scene,
+		shadowMapUniformBuffers.sceneMem);
+
+		shadowMapUniformBuffers.sceneDescriptor.buffer = shadowMapUniformBuffers.scene;
+		shadowMapUniformBuffers.sceneDescriptor.offset = 0;
+		shadowMapUniformBuffers.sceneDescriptor.range = sizeof(uboVSscene);
+		VK_CHECK(vkMapMemory(_device,shadowMapUniformBuffers.sceneMem,0,size,0,&shadowMapUniformBuffers.sceneMapped))
+	}
+
+	{
+		uint32_t size = sizeof(uboOffscreenVS);
+		createBuffer(size,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		shadowMapUniformBuffers.offscreen,
+		shadowMapUniformBuffers.offscreenMem);
+
+		shadowMapUniformBuffers.offscreenDescriptor.buffer = shadowMapUniformBuffers.offscreen;
+		shadowMapUniformBuffers.offscreenDescriptor.offset = 0;
+		shadowMapUniformBuffers.offscreenDescriptor.range = sizeof(uboOffscreenVS);
+		VK_CHECK(vkMapMemory(_device,shadowMapUniformBuffers.offscreenMem,0,size,0,&shadowMapUniformBuffers.offscreenMapped))
+	}
+
+
+	_mainDeletionQueue.push_function([=](){
+		vkFreeMemory(_device,shadowMapUniformBuffers.sceneMem,nullptr);
+		vkDestroyBuffer(_device,shadowMapUniformBuffers.scene,nullptr);
+
+		vkFreeMemory(_device,shadowMapUniformBuffers.offscreenMem,nullptr);
+		vkDestroyBuffer(_device,shadowMapUniformBuffers.offscreen,nullptr);
 	});
 }
 
@@ -1565,8 +1666,33 @@ VkSampler VulkanEngine::createSampler()
 	createInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	createInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 
-	createInfo.magFilter = VK_FILTER_LINEAR;
-	createInfo.minFilter = VK_FILTER_LINEAR;
+	createInfo.magFilter = VK_FILTER_NEAREST;
+	createInfo.minFilter = VK_FILTER_NEAREST;
+	createInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+	createInfo.unnormalizedCoordinates = VK_FALSE;
+	createInfo.compareEnable = VK_FALSE;
+	createInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+
+	createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	createInfo.mipLodBias = 0.0f;
+	createInfo.minLod = 0.0f;
+	createInfo.maxLod = 0.0f;
+	VkSampler sampler{};
+	VK_CHECK(vkCreateSampler(_device, &createInfo, nullptr, &sampler));
+	return sampler;
+}
+
+VkSampler VulkanEngine::createSampler(VkFilter filter)
+{
+	VkSamplerCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	createInfo.anisotropyEnable = VK_FALSE;
+	createInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	createInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	createInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	createInfo.magFilter = filter;
+	createInfo.minFilter = filter;
 	createInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
 	createInfo.unnormalizedCoordinates = VK_FALSE;
 	createInfo.compareEnable = VK_FALSE;
@@ -1667,4 +1793,119 @@ void VulkanEngine::init_imgui()
 		vkDestroyDescriptorPool(_device, imguiPool, nullptr);
 		ImGui_ImplVulkan_Shutdown();
 		});
+}
+
+void VulkanEngine::prepareOffscreenRenderpass()
+{
+	VkAttachmentDescription attachmentDescription{};
+	attachmentDescription.format = _depthStencil.format;
+	attachmentDescription.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;							// Clear depth at beginning of the render pass
+	attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;						// We will read from depth, so it's important to store the depth attachment results
+	attachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;					// We don't care about initial layout of the attachment
+	attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;// Attachment will be transitioned to shader read at render pass end
+
+	VkAttachmentReference depthReference = {};
+	depthReference.attachment = 0;
+	depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;			// Attachment will be used as depth/stencil during render pass
+
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 0;													// No color attachments
+	subpass.pDepthStencilAttachment = &depthReference;									// Reference to our depth attachment
+
+	// Use subpass dependencies for layout transitions
+	std::array<VkSubpassDependency, 2> dependencies;
+
+	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[0].dstSubpass = 0;
+	dependencies[0].srcStageMask    = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	dependencies[0].dstStageMask    = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependencies[0].srcAccessMask   = VK_ACCESS_SHADER_READ_BIT;
+	dependencies[0].dstAccessMask   = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+	dependencies[1].srcSubpass = 0;
+	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+	VkRenderPassCreateInfo renderPassCreateInfo = vkinit::renderpass_create_info();
+	renderPassCreateInfo.attachmentCount = 1;
+	renderPassCreateInfo.pAttachments = &attachmentDescription;
+	renderPassCreateInfo.subpassCount = 1;
+	renderPassCreateInfo.pSubpasses = &subpass;
+	renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+	renderPassCreateInfo.pDependencies = dependencies.data();
+
+	VK_CHECK(vkCreateRenderPass(_device, &renderPassCreateInfo, nullptr, &offscreenPass.renderPass));
+
+	_mainDeletionQueue.push_function([=]() {
+		vkDestroyRenderPass(_device,offscreenPass.renderPass,nullptr);
+	});
+}
+
+void VulkanEngine::prepareOffscreenFramebuffer()
+{
+	offscreenPass.width = SHADOWMAP_DIM;
+	offscreenPass.height = SHADOWMAP_DIM;
+
+	// For shadow mapping we only need a depth attachment
+	VkImageCreateInfo image {};
+	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image.imageType = VK_IMAGE_TYPE_2D;
+	image.extent.width = offscreenPass.width;
+	image.extent.height = offscreenPass.height;
+	image.extent.depth = 1;
+	image.mipLevels = 1;
+	image.arrayLayers = 1;
+	image.samples = VK_SAMPLE_COUNT_1_BIT;
+	image.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image.format = _depthStencil.format;																// Depth stencil attachment
+	image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;		// We will sample directly from the depth attachment for the shadow mapping
+	
+	createImage(image,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,offscreenPass.depth.image,offscreenPass.depth.mem);
+
+	VkImageViewCreateInfo depthStencilView = vkinit::imageview_begin_info(offscreenPass.depth.image,_depthStencil.format,VK_IMAGE_ASPECT_DEPTH_BIT);
+	// depthStencilView.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	// depthStencilView.format = DEPTH_FORMAT;
+	// depthStencilView.subresourceRange = {};
+	// depthStencilView.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	// depthStencilView.subresourceRange.baseMipLevel = 0;
+	// depthStencilView.subresourceRange.levelCount = 1;
+	// depthStencilView.subresourceRange.baseArrayLayer = 0;
+	// depthStencilView.subresourceRange.layerCount = 1;
+	// depthStencilView.image = offscreenPass.depth.image;
+	VK_CHECK(vkCreateImageView(_device, &depthStencilView, nullptr, &offscreenPass.depth.view));
+
+	// Create sampler to sample from to depth attachment
+	// Used to sample in the fragment shader for shadowed rendering
+	offscreenPass.depthSampler = createSampler();
+
+	prepareOffscreenRenderpass();
+
+	// Create frame buffer
+	VkFramebufferCreateInfo fbufCreateInfo {};
+	fbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	fbufCreateInfo.renderPass = offscreenPass.renderPass;
+	fbufCreateInfo.attachmentCount = 1;
+	fbufCreateInfo.pAttachments = &offscreenPass.depth.view;
+	fbufCreateInfo.width = offscreenPass.width;
+	fbufCreateInfo.height = offscreenPass.height;
+	fbufCreateInfo.layers = 1;
+
+	VK_CHECK(vkCreateFramebuffer(_device, &fbufCreateInfo, nullptr, &offscreenPass.frameBuffer));
+
+	_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(_device,offscreenPass.depth.view,nullptr);
+		vkFreeMemory(_device,offscreenPass.depth.mem,nullptr);
+		vkDestroyImage(_device,offscreenPass.depth.image,nullptr);
+		vkDestroyFramebuffer(_device,offscreenPass.frameBuffer,nullptr);
+		vkDestroySampler(_device,offscreenPass.depthSampler,nullptr);
+	});
 }

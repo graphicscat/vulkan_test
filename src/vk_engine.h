@@ -150,6 +150,63 @@ public:
 	VkDescriptorSet _uboSet;
 
 	AllocatedImage _texture;
+
+
+	//for shadowing
+	// Framebuffer for offscreen rendering
+	struct FrameBufferAttachment {
+		VkImage image;
+		VkDeviceMemory mem;
+		VkImageView view;
+	};
+	struct OffscreenPass {
+		int32_t width, height;
+		VkFramebuffer frameBuffer;
+		FrameBufferAttachment depth;
+		VkRenderPass renderPass;
+		VkSampler depthSampler;
+		VkDescriptorImageInfo descriptor;
+	} offscreenPass;
+
+	VkPipeline shadowMapPipeline;
+	VkDescriptorSetLayout shadowMapDescriptorLayout;
+	VkPipelineLayout shadowMapPipelineLayout;
+
+	struct {
+		VkBuffer scene;
+		VkDeviceMemory sceneMem;
+		VkDescriptorBufferInfo sceneDescriptor{};
+		void* sceneMapped = nullptr;
+
+		VkBuffer offscreen;
+		VkDeviceMemory offscreenMem;
+		VkDescriptorBufferInfo offscreenDescriptor{};
+		void* offscreenMapped = nullptr;
+
+	} shadowMapUniformBuffers;
+
+	struct {
+		glm::mat4 projection;
+		glm::mat4 view;
+		glm::mat4 model;
+		glm::mat4 depthBiasMVP;
+		glm::vec4 lightPos;
+		// Used for depth map visualization
+		float zNear;
+		float zFar;
+	} uboVSscene;
+
+	struct {
+		glm::mat4 depthMVP;
+	} uboOffscreenVS;
+
+	struct ShadowMapDescriptorSets{
+		VkDescriptorSet debug;
+		VkDescriptorSet offscreen;
+	}shadowMapDescriptorSets;
+
+	//------------------------------------
+
 	//initializes everything in the engine
 	void init();
 
@@ -218,10 +275,15 @@ public:
 	void endSingleCommand(VkCommandBuffer cmdBuffer);
 
 	VkSampler createSampler();
+	VkSampler createSampler(VkFilter filter);
 
 private:
 
 	void init_vulkan();
+
+	//shadowMap
+	void prepareOffscreenRenderpass();
+	void prepareOffscreenFramebuffer();
 
 	void init_swapchain();
 

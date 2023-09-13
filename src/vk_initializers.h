@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vk_types.h>
-
+#include <vector>
 namespace vkinit {
 
 	VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags = 0);
@@ -48,5 +48,8 @@ namespace vkinit {
 
 	VkWriteDescriptorSet write_descriptor_image(VkDescriptorType type, VkDescriptorSet dstSet, VkDescriptorImageInfo* imageInfo, uint32_t binding);
 	
+	VkRenderPassCreateInfo renderpass_create_info();
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutLayout_create_info(const std::vector<VkDescriptorSetLayoutBinding>&bindings);
 }
 
